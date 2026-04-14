@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>奇迹暖暖编号提取器 - 逻辑精控版</title>
+    <script src="https://lib.baomitu.com/tesseract.js/4.0.1/tesseract.min.js"></script>
+    <style>
+        body { font-family: sans-serif; background: #fff5f8; padding: 20px; color: #444; }
+        .panel { display: flex; flex-direction: column; gap: 15px; max-width: 1000px; margin: auto; }
+        .category-tabs { display: flex; flex-wrap: wrap; gap: 8px; background: white; padding: 15px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        .tab-btn { padding: 8px 16px; border: 1px solid #f06292; border-radius: 20px; background: white; color: #f06292; cursor: pointer; font-size: 14px; transition: 0.2s; font-weight: bold; }
+        .tab-btn.active { background: #f06292; color: white; }
+        .monitor { display: flex; gap: 10px; }
+        video { width: 50%; border: 2px solid #ff80ab; border-radius: 8px; background: #000; }
+        canvas { width: 50%; border: 2px dashed #f06292; background: #fff; border-radius: 8px; }
+        .controls { background: white; padding: 15px; border-radius: 12px; display: flex; align-items: center; gap: 12px; }
+        button.action-btn { padding: 10px 18px; border: none; border-radius: 20px; color: white; font-weight: bold; cursor: pointer; }
+        #startBtn { background: #ff4081; }
+        #stopBtn { background: #888; }
+        #copyBtn { background: #4caf50; }
+        #clearBtn { background: #ff9800; }
+        #status { font-size: 13px; color: #999; }
+        .results-area { background: white; padding: 15px; border-radius: 10px; min-height: 120px; border: 1px solid #fce4ec; }
+        .id-tag { display: inline-block; background: #f06292; color: white; margin: 3px; padding: 5px 12px; border-radius: 6px; font-size: 14px; font-family: monospace; }
+        .hint { font-size: 12px; color: #f06292; margin-bottom: 8px; }
+    </style>
+</head>
+<body>
+
+<div class="panel">
+    <h2>👗 编号提取器 </h2>
+    <div class="category-tabs" id="categoryTabs"></div>
+    <div class="controls">
+        <button id="startBtn" class="action-btn" disabled>1. 开始捕获</button>
+        <button id="stopBtn" class="action-btn">停止</button>
+        <button id="copyBtn" class="action-btn">一键复制当前</button>
+        <button id="clearBtn" class="action-btn">清空当前</button>
+        <span id="status">正在准备 OCR 引擎...</span>
+    </div>
+    <div class="monitor">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="debugCanvas"></canvas>
+    </div>
+    <div class="results-area">
+        <div class="hint" id="rangeHint">正在初始化...</div>
+        <h3>已提取 <span id="curPartName">发型</span> 编号: <span id="count">0</span></h3>
+        <hr style="border:0; border-top:1px solid #eee; margin:10px 0;">
+        <div id="results">等待识别...</div>
+    </div>
+</div>
+
+<script>
+    const categories = [
+        { name: '发型', max: 9999 }, { name: '连衣裙', max: 8999 }, { name: '外套', max: 5999 },
+        { name: '上衣', max: 4999 }, { name: '下装', max: 4999 }, { name: '袜子', max: 8999 },
+        { name: '鞋子', max: 6999 }, { name: '饰品', max: 23999 }, { name: '妆容', max: 1999 },
+        { name: '荧光之灵', max: 500 }
+    ];
+
+    // --- 全局控制参数 ---
+    const MAX_STEP = 400;      // 相邻两个编号允许的最大跳跃值
+    const MIN_CONFIDENCE = 82; // OCR 最小置信度
+    // -------------------
+
+    let currentCatIdx = 0;
+    let categoryData = {}; 
+    categories.forEach(c => categoryData[c.name] = new Set());
+
+    const video = document.getElementById('video');
+    const debugCanvas = document.getElementById('debugCanvas');
+    const resultsDiv = document.getElementById('results');
+    const statusDiv = document.getElementById('status');
+    const countSpan = document.getElementById('count');
+    const startBtn = document.getElementById('startBtn');
+    const curPartName = document.getElementById('curPartName');
+    const rangeHint = document.getElementById('rangeHint');
+
+    let worker = null;
+    let scanning = false;
+    let isProcessing = false;
+
+    // 图像算法参数 (继承自 wardrobe_scanner2)
+    const TEXT_COLOR = { r: 180, g: 160, b: 162 }; 
+    const BG_COLOR = { r: 253, g: 248, b: 247 };   
+    const TOLERANCE = 55; 
+
+    function initTabs() {
+        const container = document.getElementById('categoryTabs');
+        categories.forEach((cat, index) => {
+            const btn = document.createElement('button');
+            btn.className = `tab-btn ${index === 0 ? 'active' : ''}`;
+            btn.innerText = cat.name;
+            btn.onclick = () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentCatIdx = index;
+                updateUI();
+            };
+            container.appendChild(btn);
+        });
+    }
+
+    function updateUI() {
+        const cat = categories[currentCatIdx];
+        curPartName.innerText = cat.name;
+        rangeHint.innerText = `当前部位：${cat.name} | 限制：001 - ${cat.max} | 步长过滤：< ${MAX_STEP}`;
+        renderResults();
+    }
+
+    function renderResults() {
+        const catName = categories[currentCatIdx].name;
+        const currentSet = categoryData[catName];
+        const sorted = Array.from(currentSet).sort((a,b) => parseInt(a) - parseInt(b));
+        countSpan.innerText = sorted.length;
+        resultsDiv.innerHTML = sorted.map(id => `<span class="id-tag">${id}</span>`).join('');
+    }
+
+    async function init() {
+        initTabs();
+        try {
+            worker = await Tesseract.createWorker();
+            await worker.loadLanguage('eng');
+            await worker.initialize('eng');
+            await worker.setParameters({
+                tessedit_char_whitelist: '0123456789',
+                tessedit_pageseg_mode: '11', 
+            });
+            statusDiv.innerText = "✅ 引擎就绪";
+            startBtn.disabled = false;
+            updateUI();
+        } catch (e) { statusDiv.innerText = "❌ 加载失败"; }
+    }
+    init();
+
+    startBtn.onclick = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+            video.srcObject = stream;
+            scanning = true;
+            statusDiv.innerText = "🚀 精准扫描中...";
+            requestAnimationFrame(previewLoop);
+            ocrLoop();
+        } catch (e) { console.error(e); }
+    };
+
+    function previewLoop() {
+        if (!scanning) return;
+        processImage();
+        requestAnimationFrame(previewLoop);
+    }
+
+    function processImage() {
+        if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
+        const ctx = debugCanvas.getContext('2d', { alpha: false });
+        
+        // 集中采集区域，避开顶部UI和底部操作条
+        const cropX = video.videoWidth * 0.3; 
+        const cropW = video.videoWidth * 0.58; 
+        const cropY = video.videoHeight * 0.18;
+        const cropH = video.videoHeight * 0.72;
+        const scale = 2.5; 
+
+        debugCanvas.width = cropW * scale;
+        debugCanvas.height = cropH * scale;
+
+        ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, debugCanvas.width, debugCanvas.height);
+
+        const imgData = ctx.getImageData(0, 0, debugCanvas.width, debugCanvas.height);
+        const data = imgData.data;
+
+        for (let i = 0; i < data.length; i += 4) {
+            const r = data[i], g = data[i+1], b = data[i+2];
+            const dText = Math.sqrt(Math.pow(r - TEXT_COLOR.r,2) + Math.pow(g - TEXT_COLOR.g,2) + Math.pow(b - TEXT_COLOR.b,2));
+            const dBg = Math.sqrt(Math.pow(r - BG_COLOR.r,2) + Math.pow(g - BG_COLOR.g,2) + Math.pow(b - BG_COLOR.b,2));
+            let v = (dText < TOLERANCE && dBg > 35) ? 0 : 255;
+            data[i] = data[i+1] = data[i+2] = v;
+        }
+        ctx.putImageData(imgData, 0, 0);
+    }
+
+    async function ocrLoop() {
+        if (!scanning) return;
+        if (!isProcessing && video.readyState === video.HAVE_ENOUGH_DATA) {
+            isProcessing = true;
+            try {
+                const result = await worker.recognize(debugCanvas);
+                const currentCat = categories[currentCatIdx];
+                const currentSet = categoryData[currentCat.name];
+
+                // 1. 获取单词数据并按置信度和几何初步过滤
+                let words = result.data.words
+                    .filter(w => w.confidence > MIN_CONFIDENCE)
+                    .map(w => ({
+                        text: w.text.replace(/\D/g, ''),
+                        y: w.bbox.y0,
+                        x: w.bbox.x0,
+                        h: w.bbox.y1 - w.bbox.y0
+                    }))
+                    .filter(w => w.text.length >= 3 && w.h > 12 && w.h < 100);
+
+                // 2. 空间逻辑排序
+                words.sort((a, b) => (Math.abs(a.y - b.y) < 50) ? a.x - b.x : a.y - b.y);
+
+                let changed = false;
+                for (let i = 0; i < words.length; i++) {
+                    let numStr = words[i].text;
+                    let val = parseInt(numStr);
+
+                    // --- 核心：修正后的步长逻辑 ---
+                    if (i > 0) {
+                        const prevVal = parseInt(words[i-1].text);
+                        
+                        // 场景1：数字变小，可能丢了首位1
+                        if (val < prevVal) {
+                            // 修正门槛：只有前一个数很大（>800），当前数很小（<200），才尝试 +1000
+                            if (prevVal > 800 && val < 200 && (val + 1000 - prevVal) < MAX_STEP) {
+                                val += 1000;
+                                numStr = val.toString();
+                            } 
+                            // 修正门槛：1/7 混淆
+                            else if (numStr[0] === '7') {
+                                let fixedVal = parseInt("1" + numStr.substring(1));
+                                if (fixedVal > prevVal && (fixedVal - prevVal) < MAX_STEP) {
+                                    val = fixedVal;
+                                    numStr = val.toString();
+                                }
+                            }
+                        }
+
+                        // 场景2：数字突变过大（幻觉数字）
+                        // 如果当前数字比前一个数字大了超过 MAX_STEP，极有可能是误读了背景
+                        if (val - prevVal > MAX_STEP) {
+                            continue; // 舍弃这个脏数据
+                        }
+                    }
+
+                    // 3. 严格范围确认
+                    const isAcc = currentCat.name === '饰品';
+                    const isValidLen = isAcc ? (numStr.length >= 3 && numStr.length <= 5) : (numStr.length >= 3 && numStr.length <= 4);
+                    
+                    if (isValidLen && val <= currentCat.max) {
+                        if (!currentSet.has(numStr)) {
+                            currentSet.add(numStr);
+                            changed = true;
+                        }
+                    }
+                }
+
+                if (changed) renderResults();
+            } catch (e) { console.error(e); }
+            isProcessing = false;
+        }
+        setTimeout(ocrLoop, 850);
+    }
+
+    document.getElementById('copyBtn').onclick = () => {
+        const catName = categories[currentCatIdx].name;
+        const sorted = Array.from(categoryData[catName]).sort((a,b) => parseInt(a) - parseInt(b));
+        navigator.clipboard.writeText(sorted.join(' ')).then(() => alert(`已复制【${catName}】`));
+    };
+
+    document.getElementById('clearBtn').onclick = () => {
+        const name = categories[currentCatIdx].name;
+        if (confirm(`清空【${name}】？`)) {
+            categoryData[name].clear();
+            renderResults();
+        }
+    };
+
+    document.getElementById('stopBtn').onclick = () => {
+        scanning = false;
+        if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
+        statusDiv.innerText = "🛑 已停止";
+    };
+</script>
+</body>
+</html>
+<!--author:Tao, 最后更新2026/4/14-->
