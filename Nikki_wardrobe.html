@@ -56,7 +56,7 @@
         { name: '上衣', max: 4999 }, { name: '下装', max: 4999 }, { name: '袜子', max: 8999 },
         { name: '鞋子', max: 6999 }, { name: '饰品', max: 23999 }, { name: '妆容', max: 1999 },
         { name: '荧光之灵', max: 500 }
-    ];
+    ];//此处修改每种类型的最大值限制
 
     // --- 全局控制参数 ---
     const MAX_STEP = 400;      // 相邻两个编号允许的最大跳跃值
@@ -80,7 +80,7 @@
     let scanning = false;
     let isProcessing = false;
 
-    // 图像算法参数 (继承自 wardrobe_scanner2)
+    // 图像算法参数
     const TEXT_COLOR = { r: 180, g: 160, b: 162 }; 
     const BG_COLOR = { r: 253, g: 248, b: 247 };   
     const TOLERANCE = 55; 
@@ -154,7 +154,8 @@
         if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
         const ctx = debugCanvas.getContext('2d', { alpha: false });
         
-        // 集中采集区域，避开顶部UI和底部操作条
+        // 集中采集区域，避开顶部UI和底部操作条，如果实际过程中框图选择有问题进行修改下述参数
+        //cropX和const cropW是左右长度，cropY和cropH是上下长度
         const cropX = video.videoWidth * 0.3; 
         const cropW = video.videoWidth * 0.58; 
         const cropY = video.videoHeight * 0.18;
