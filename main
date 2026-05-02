@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>奇迹暖暖编号提取器 - 参数可调版</title>
+    <script src="https://lib.baomitu.com/tesseract.js/4.0.1/tesseract.min.js"></script>
+    <style>
+        body { font-family: sans-serif; background: #fff5f8; padding: 20px; color: #444; }
+        .panel { display: flex; flex-direction: column; gap: 15px; max-width: 1000px; margin: auto; }
+        .category-tabs { display: flex; flex-wrap: wrap; gap: 8px; background: white; padding: 15px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        .tab-btn { padding: 8px 16px; border: 1px solid #f06292; border-radius: 20px; background: white; color: #f06292; cursor: pointer; font-size: 14px; transition: 0.2s; font-weight: bold; }
+        .tab-btn.active { background: #f06292; color: white; }
+        .monitor { display: flex; gap: 10px; }
+        video { width: 50%; border: 2px solid #ff80ab; border-radius: 8px; background: #000; }
+        canvas { width: 50%; border: 2px dashed #f06292; background: #fff; border-radius: 8px; }
+        .controls { background: white; padding: 15px; border-radius: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        button.action-btn { padding: 10px 18px; border: none; border-radius: 20px; color: white; font-weight: bold; cursor: pointer; }
+        #startBtn { background: #ff4081; }
+        #stopBtn { background: #888; }
+        #copyBtn { background: #4caf50; }
+        #clearBtn { background: #ff9800; }
+        #status { font-size: 13px; color: #999; }
+        .results-area { background: white; padding: 15px; border-radius: 10px; min-height: 120px; border: 1px solid #fce4ec; }
+        .id-tag { display: inline-block; background: #f06292; color: white; margin: 3px; padding: 5px 12px; border-radius: 6px; font-size: 14px; font-family: monospace; }
+        .hint { font-size: 12px; color: #f06292; margin-bottom: 8px; }
+
+        /* ===== 参数调整面板 ===== */
+        .param-panel {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            overflow: hidden;
+            border: 1px solid #fce4ec;
+        }
+        .param-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 18px;
+            background: linear-gradient(135deg, #fce4ec, #fff5f8);
+            cursor: pointer;
+            user-select: none;
+        }
+        .param-header h3 {
+            margin: 0;
+            font-size: 15px;
+            color: #e91e8c;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .param-toggle {
+            font-size: 18px;
+            color: #f06292;
+            transition: transform 0.25s;
+        }
+        .param-toggle.open { transform: rotate(180deg); }
+        .param-body {
+            display: none;
+            padding: 16px 18px 18px;
+            border-top: 1px solid #fce4ec;
+        }
+        .param-body.open { display: block; }
+
+        .param-section-title {
+            font-size: 13px;
+            font-weight: bold;
+            color: #f06292;
+            margin: 12px 0 8px;
+            padding-bottom: 4px;
+            border-bottom: 1px dashed #fce4ec;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .param-section-title:first-child { margin-top: 0; }
+
+        .param-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 10px 24px;
+        }
+        .param-row {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .param-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            color: #666;
+        }
+        .param-label span.val {
+            font-weight: bold;
+            color: #e91e8c;
+            font-family: monospace;
+            min-width: 42px;
+            text-align: right;
+        }
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 5px;
+            background: #fce4ec;
+            border-radius: 4px;
+            outline: none;
+            cursor: pointer;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #f06292;
+            cursor: pointer;
+            box-shadow: 0 1px 4px rgba(240,98,146,0.4);
+            transition: background 0.15s;
+        }
+        input[type="range"]::-webkit-slider-thumb:hover { background: #e91e8c; }
+
+        .param-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 14px;
+            flex-wrap: wrap;
+        }
+        .param-actions button {
+            padding: 7px 14px;
+            border: none;
+            border-radius: 16px;
+            font-size: 13px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.15s;
+        }
+        #applyBtn { background: #f06292; color: white; }
+        #applyBtn:hover { background: #e91e8c; }
+        #resetBtn { background: #fce4ec; color: #f06292; }
+        #resetBtn:hover { background: #f8bbd0; }
+
+        .param-tip {
+            font-size: 11px;
+            color: #bbb;
+            line-height: 1.6;
+            margin-top: 12px;
+            padding: 10px 12px;
+            background: #fffaf8;
+            border-radius: 8px;
+            border-left: 3px solid #f06292;
+        }
+
+        /* 裁剪预览叠加框 */
+        .monitor-wrap { position: relative; display: flex; gap: 10px; }
+        #cropOverlay {
+            position: absolute;
+            border: 2px solid #ff4081;
+            background: rgba(255, 64, 129, 0.08);
+            pointer-events: none;
+            border-radius: 4px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="panel">
+    <h2>👗 编号提取器</h2>
+    <div class="category-tabs" id="categoryTabs"></div>
+
+    <div class="controls">
+        <button id="startBtn" class="action-btn" disabled>1. 开始捕获</button>
+        <button id="stopBtn" class="action-btn">停止</button>
+        <button id="copyBtn" class="action-btn">一键复制当前</button>
+        <button id="clearBtn" class="action-btn">清空当前</button>
+        <span id="status">正在准备 OCR 引擎...</span>
+    </div>
+
+    <!-- ===== 参数调整面板 ===== -->
+    <div class="param-panel">
+        <div class="param-header" id="paramHeader">
+            <h3>⚙️ 参数调整 <span style="font-size:12px;font-weight:normal;color:#aaa;">（展开可自定义裁剪区域与识别参数）</span></h3>
+            <span class="param-toggle" id="paramToggle">▼</span>
+        </div>
+        <div class="param-body" id="paramBody">
+
+            <div class="param-section-title">📐 画面裁剪区域（比例，相对视频尺寸）</div>
+            <div class="param-grid">
+                <div class="param-row">
+                    <div class="param-label"><span>左边距 cropX</span><span class="val" id="v_cropX">30%</span></div>
+                    <input type="range" id="s_cropX" min="0" max="60" step="1" value="30">
+                </div>
+                <div class="param-row">
+                    <div class="param-label"><span>顶边距 cropY</span><span class="val" id="v_cropY">18%</span></div>
+                    <input type="range" id="s_cropY" min="0" max="60" step="1" value="18">
+                </div>
+                <div class="param-row">
+                    <div class="param-label"><span>裁剪宽度 cropW</span><span class="val" id="v_cropW">58%</span></div>
+                    <input type="range" id="s_cropW" min="10" max="100" step="1" value="58">
+                </div>
+                <div class="param-row">
+                    <div class="param-label"><span>裁剪高度 cropH</span><span class="val" id="v_cropH">72%</span></div>
+                    <input type="range" id="s_cropH" min="10" max="100" step="1" value="72">
+                </div>
+            </div>
+
+            <div class="param-section-title">🔬 图像处理参数</div>
+            <div class="param-grid">
+                <div class="param-row">
+                    <div class="param-label"><span>放大倍率 scale</span><span class="val" id="v_scale">2.5×</span></div>
+                    <input type="range" id="s_scale" min="1" max="5" step="0.5" value="2.5">
+                </div>
+                <div class="param-row">
+                    <div class="param-label"><span>颜色容差 tolerance</span><span class="val" id="v_tolerance">55</span></div>
+                    <input type="range" id="s_tolerance" min="10" max="120" step="1" value="55">
+                </div>
+            </div>
+
+            <div class="param-section-title">🧠 OCR 识别过滤参数</div>
+            <div class="param-grid">
+                <div class="param-row">
+                    <div class="param-label"><span>最低置信度 minConf</span><span class="val" id="v_minConf">82</span></div>
+                    <input type="range" id="s_minConf" min="30" max="99" step="1" value="82">
+                </div>
+                <div class="param-row">
+                    <div class="param-label"><span>最大步长 maxStep</span><span class="val" id="v_maxStep">400</span></div>
+                    <input type="range" id="s_maxStep" min="50" max="2000" step="50" value="400">
+                </div>
+                <div class="param-row">
+                    <div class="param-label"><span>字符最小高度 minH</span><span class="val" id="v_minH">12px</span></div>
+                    <input type="range" id="s_minH" min="4" max="50" step="1" value="12">
+                </div>
+                <div class="param-row">
+                    <div class="param-label"><span>字符最大高度 maxH</span><span class="val" id="v_maxH">100px</span></div>
+                    <input type="range" id="s_maxH" min="20" max="300" step="5" value="100">
+                </div>
+                <div class="param-row">
+                    <div class="param-label"><span>扫描间隔 interval</span><span class="val" id="v_interval">850ms</span></div>
+                    <input type="range" id="s_interval" min="200" max="3000" step="50" value="850">
+                </div>
+            </div>
+
+            <div class="param-actions">
+                <button id="applyBtn">✅ 立即应用</button>
+                <button id="resetBtn">↩️ 恢复默认</button>
+            </div>
+
+            <div class="param-tip">
+                💡 <b>手机比例适配建议：</b>竖屏手机通常数字列较窄居中，可将 cropX 调至 <b>35~40%</b>、cropW 调至 <b>30~40%</b>；若顶部有状态栏遮挡，适当增大 cropY。<br>
+                放大倍率越高识别越清晰但性能越低；置信度调低会识别更多但出错也更多；步长过大会让幻觉数字混入结果。
+            </div>
+        </div>
+    </div>
+    <!-- ===== 参数调整面板 END ===== -->
+
+    <div class="monitor-wrap">
+        <div style="position:relative; width:50%;">
+            <video id="video" autoplay muted playsinline style="width:100%; border:2px solid #ff80ab; border-radius:8px; background:#000; display:block;"></video>
+            <div id="cropOverlay"></div>
+        </div>
+        <canvas id="debugCanvas" style="width:50%; border:2px dashed #f06292; background:#fff; border-radius:8px;"></canvas>
+    </div>
+
+    <div class="results-area">
+        <div class="hint" id="rangeHint">正在初始化...</div>
+        <h3>已提取 <span id="curPartName">发型</span> 编号: <span id="count">0</span></h3>
+        <hr style="border:0; border-top:1px solid #eee; margin:10px 0;">
+        <div id="results">等待识别...</div>
+    </div>
+</div>
+
+<script>
+    const categories = [
+        { name: '发型', max: 9999 }, { name: '连衣裙', max: 8999 }, { name: '外套', max: 5999 },
+        { name: '上衣', max: 4999 }, { name: '下装', max: 4999 }, { name: '袜子', max: 8999 },
+        { name: '鞋子', max: 6999 }, { name: '饰品', max: 23999 }, { name: '妆容', max: 1999 },
+        { name: '荧光之灵', max: 500 }
+    ];
+
+    // ===== 默认参数（与原版完全相同） =====
+    const DEFAULTS = {
+        cropX: 30, cropY: 18, cropW: 58, cropH: 72,
+        scale: 2.5,
+        tolerance: 55,
+        minConf: 82,
+        maxStep: 400,
+        minH: 12,
+        maxH: 100,
+        interval: 850
+    };
+
+    // ===== 当前运行参数（可热更新） =====
+    let P = { ...DEFAULTS };
+
+    // 原始文字/背景颜色（不开放调整，保持原版）
+    const TEXT_COLOR = { r: 180, g: 160, b: 162 };
+    const BG_COLOR   = { r: 253, g: 248, b: 247 };
+
+    // ===== 参数面板联动 =====
+    const sliderDefs = [
+        { id: 's_cropX',    valId: 'v_cropX',    key: 'cropX',    fmt: v => v + '%' },
+        { id: 's_cropY',    valId: 'v_cropY',    key: 'cropY',    fmt: v => v + '%' },
+        { id: 's_cropW',    valId: 'v_cropW',    key: 'cropW',    fmt: v => v + '%' },
+        { id: 's_cropH',    valId: 'v_cropH',    key: 'cropH',    fmt: v => v + '%' },
+        { id: 's_scale',    valId: 'v_scale',    key: 'scale',    fmt: v => v + '×' },
+        { id: 's_tolerance',valId: 'v_tolerance', key: 'tolerance',fmt: v => v },
+        { id: 's_minConf',  valId: 'v_minConf',  key: 'minConf',  fmt: v => v },
+        { id: 's_maxStep',  valId: 'v_maxStep',  key: 'maxStep',  fmt: v => v },
+        { id: 's_minH',     valId: 'v_minH',     key: 'minH',     fmt: v => v + 'px' },
+        { id: 's_maxH',     valId: 'v_maxH',     key: 'maxH',     fmt: v => v + 'px' },
+        { id: 's_interval', valId: 'v_interval', key: 'interval', fmt: v => v + 'ms' },
+    ];
+
+    // 暂存用户正在拖动的值（点击应用后才生效到 P）
+    let pendingP = { ...DEFAULTS };
+
+    sliderDefs.forEach(({ id, valId, key, fmt }) => {
+        const slider = document.getElementById(id);
+        const valSpan = document.getElementById(valId);
+        slider.addEventListener('input', () => {
+            const v = parseFloat(slider.value);
+            pendingP[key] = v;
+            valSpan.textContent = fmt(v);
+            updateCropOverlay(); // 裁剪框实时更新
+        });
+    });
+
+    document.getElementById('applyBtn').onclick = () => {
+        P = { ...pendingP };
+        updateUI();
+        // 小提示
+        const btn = document.getElementById('applyBtn');
+        btn.textContent = '✅ 已应用！';
+        setTimeout(() => btn.textContent = '✅ 立即应用', 1200);
+    };
+
+    document.getElementById('resetBtn').onclick = () => {
+        pendingP = { ...DEFAULTS };
+        sliderDefs.forEach(({ id, valId, fmt, key }) => {
+            document.getElementById(id).value = DEFAULTS[key];
+            document.getElementById(valId).textContent = fmt(DEFAULTS[key]);
+        });
+        updateCropOverlay();
+    };
+
+    // 折叠面板
+    document.getElementById('paramHeader').onclick = () => {
+        const body = document.getElementById('paramBody');
+        const toggle = document.getElementById('paramToggle');
+        const open = body.classList.toggle('open');
+        toggle.classList.toggle('open', open);
+        if (open) updateCropOverlay();
+        else document.getElementById('cropOverlay').style.display = 'none';
+    };
+
+    // 裁剪预览叠加框
+    function updateCropOverlay() {
+        const overlay = document.getElementById('cropOverlay');
+        const video = document.getElementById('video');
+        if (!video.videoWidth) { overlay.style.display = 'none'; return; }
+        const vw = video.clientWidth;
+        const vh = video.clientHeight;
+        const x = pendingP.cropX / 100 * vw;
+        const y = pendingP.cropY / 100 * vh;
+        const w = pendingP.cropW / 100 * vw;
+        const h = pendingP.cropH / 100 * vh;
+        overlay.style.display = 'block';
+        overlay.style.left = x + 'px';
+        overlay.style.top = y + 'px';
+        overlay.style.width = w + 'px';
+        overlay.style.height = h + 'px';
+    }
+
+    // ===== 原始业务逻辑（不改动） =====
+    let currentCatIdx = 0;
+    let categoryData = {};
+    categories.forEach(c => categoryData[c.name] = new Set());
+
+    const video = document.getElementById('video');
+    const debugCanvas = document.getElementById('debugCanvas');
+    const resultsDiv = document.getElementById('results');
+    const statusDiv = document.getElementById('status');
+    const countSpan = document.getElementById('count');
+    const startBtn = document.getElementById('startBtn');
+    const curPartName = document.getElementById('curPartName');
+    const rangeHint = document.getElementById('rangeHint');
+
+    let worker = null;
+    let scanning = false;
+    let isProcessing = false;
+
+    function initTabs() {
+        const container = document.getElementById('categoryTabs');
+        categories.forEach((cat, index) => {
+            const btn = document.createElement('button');
+            btn.className = `tab-btn ${index === 0 ? 'active' : ''}`;
+            btn.innerText = cat.name;
+            btn.onclick = () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentCatIdx = index;
+                updateUI();
+            };
+            container.appendChild(btn);
+        });
+    }
+
+    function updateUI() {
+        const cat = categories[currentCatIdx];
+        curPartName.innerText = cat.name;
+        rangeHint.innerText = `当前部位：${cat.name} | 限制：001 - ${cat.max} | 步长过滤：< ${P.maxStep} | 置信度：> ${P.minConf}`;
+        renderResults();
+    }
+
+    function renderResults() {
+        const catName = categories[currentCatIdx].name;
+        const currentSet = categoryData[catName];
+        const sorted = Array.from(currentSet).sort((a,b) => parseInt(a) - parseInt(b));
+        countSpan.innerText = sorted.length;
+        resultsDiv.innerHTML = sorted.map(id => `<span class="id-tag">${id}</span>`).join('');
+    }
+
+    async function init() {
+        initTabs();
+        try {
+            worker = await Tesseract.createWorker();
+            await worker.loadLanguage('eng');
+            await worker.initialize('eng');
+            await worker.setParameters({
+                tessedit_char_whitelist: '0123456789',
+                tessedit_pageseg_mode: '11',
+            });
+            statusDiv.innerText = "✅ 引擎就绪";
+            startBtn.disabled = false;
+            updateUI();
+        } catch (e) { statusDiv.innerText = "❌ 加载失败"; }
+    }
+    init();
+
+    startBtn.onclick = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+            video.srcObject = stream;
+            scanning = true;
+            statusDiv.innerText = "🚀 精准扫描中...";
+            requestAnimationFrame(previewLoop);
+            ocrLoop();
+        } catch (e) { console.error(e); }
+    };
+
+    function previewLoop() {
+        if (!scanning) return;
+        processImage();
+        // 同步更新裁剪框
+        if (document.getElementById('paramBody').classList.contains('open')) updateCropOverlay();
+        requestAnimationFrame(previewLoop);
+    }
+
+    function processImage() {
+        if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
+        const ctx = debugCanvas.getContext('2d', { alpha: false });
+
+        // 使用当前参数 P（应用后生效）
+        const cropX = video.videoWidth  * P.cropX / 100;
+        const cropW = video.videoWidth  * P.cropW / 100;
+        const cropY = video.videoHeight * P.cropY / 100;
+        const cropH = video.videoHeight * P.cropH / 100;
+        const scale = P.scale;
+
+        debugCanvas.width  = cropW * scale;
+        debugCanvas.height = cropH * scale;
+        ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, debugCanvas.width, debugCanvas.height);
+
+        const imgData = ctx.getImageData(0, 0, debugCanvas.width, debugCanvas.height);
+        const data = imgData.data;
+        const tol = P.tolerance;
+
+        for (let i = 0; i < data.length; i += 4) {
+            const r = data[i], g = data[i+1], b = data[i+2];
+            const dText = Math.sqrt((r-TEXT_COLOR.r)**2 + (g-TEXT_COLOR.g)**2 + (b-TEXT_COLOR.b)**2);
+            const dBg   = Math.sqrt((r-BG_COLOR.r)**2   + (g-BG_COLOR.g)**2   + (b-BG_COLOR.b)**2);
+            const v = (dText < tol && dBg > 35) ? 0 : 255;
+            data[i] = data[i+1] = data[i+2] = v;
+        }
+        ctx.putImageData(imgData, 0, 0);
+    }
+
+    async function ocrLoop() {
+        if (!scanning) return;
+        if (!isProcessing && video.readyState === video.HAVE_ENOUGH_DATA) {
+            isProcessing = true;
+            try {
+                const result = await worker.recognize(debugCanvas);
+                const currentCat = categories[currentCatIdx];
+                const currentSet = categoryData[currentCat.name];
+
+                let words = result.data.words
+                    .filter(w => w.confidence > P.minConf)
+                    .map(w => ({
+                        text: w.text.replace(/\D/g, ''),
+                        y: w.bbox.y0,
+                        x: w.bbox.x0,
+                        h: w.bbox.y1 - w.bbox.y0
+                    }))
+                    .filter(w => w.text.length >= 3 && w.h > P.minH && w.h < P.maxH);
+
+                words.sort((a, b) => (Math.abs(a.y - b.y) < 50) ? a.x - b.x : a.y - b.y);
+
+                let changed = false;
+                for (let i = 0; i < words.length; i++) {
+                    let numStr = words[i].text;
+                    let val = parseInt(numStr);
+
+                    if (i > 0) {
+                        const prevVal = parseInt(words[i-1].text);
+                        if (val < prevVal) {
+                            if (prevVal > 800 && val < 200 && (val + 1000 - prevVal) < P.maxStep) {
+                                val += 1000;
+                                numStr = val.toString();
+                            } else if (numStr[0] === '7') {
+                                let fixedVal = parseInt("1" + numStr.substring(1));
+                                if (fixedVal > prevVal && (fixedVal - prevVal) < P.maxStep) {
+                                    val = fixedVal;
+                                    numStr = val.toString();
+                                }
+                            }
+                        }
+                        if (val - prevVal > P.maxStep) continue;
+                    }
+
+                    const isAcc = currentCat.name === '饰品';
+                    const isValidLen = isAcc ? (numStr.length >= 3 && numStr.length <= 5) : (numStr.length >= 3 && numStr.length <= 4);
+                    if (isValidLen && val <= currentCat.max) {
+                        if (!currentSet.has(numStr)) {
+                            currentSet.add(numStr);
+                            changed = true;
+                        }
+                    }
+                }
+
+                if (changed) renderResults();
+            } catch (e) { console.error(e); }
+            isProcessing = false;
+        }
+        setTimeout(ocrLoop, P.interval);
+    }
+
+    document.getElementById('copyBtn').onclick = () => {
+        const catName = categories[currentCatIdx].name;
+        const sorted = Array.from(categoryData[catName]).sort((a,b) => parseInt(a) - parseInt(b));
+        navigator.clipboard.writeText(sorted.join(' ')).then(() => alert(`已复制【${catName}】`));
+    };
+
+    document.getElementById('clearBtn').onclick = () => {
+        const name = categories[currentCatIdx].name;
+        if (confirm(`清空【${name}】？`)) { categoryData[name].clear(); renderResults(); }
+    };
+
+    document.getElementById('stopBtn').onclick = () => {
+        scanning = false;
+        if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
+        document.getElementById('cropOverlay').style.display = 'none';
+        statusDiv.innerText = "🛑 已停止";
+    };
+</script>
+</body>
+</html>
+<!--author:Tao, 最后更新2026/4/14 | 参数调整面板 by Claude Sonnet 4.6, 2026/4/26-->
